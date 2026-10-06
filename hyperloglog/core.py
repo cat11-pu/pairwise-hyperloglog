@@ -85,7 +85,7 @@ def leading_zero_rank(value, width):
         raise ValueError("位宽必须为正: %r" % (width,))
     if value == 0:
         return width + 1
-    return width - value.bit_length()
+    return width - value.bit_length() + 1
 
 
 def alpha_for(buckets):
@@ -106,7 +106,7 @@ def harmonic_estimate(registers):
         raise ValueError("寄存器序列不能为空")
     total = 0.0
     for value in registers:
-        total += math.exp(-value)
+        total += 2.0 ** (-value)
     return alpha_for(count) * count ** 2 / total
 
 
@@ -118,7 +118,7 @@ def linear_count(buckets, zeros):
         raise ValueError("桶数必须为正: %r" % (buckets,))
     if zeros < 1:
         raise ValueError("空桶数必须为正: %r" % (zeros,))
-    return buckets * math.log10(buckets / zeros)
+    return buckets * math.log(buckets / zeros)
 
 
 def large_range_corrected(estimate, hash_bits):
@@ -127,7 +127,7 @@ def large_range_corrected(estimate, hash_bits):
     ceiling = float(1 << hash_bits)
     if estimate >= ceiling:
         return ceiling
-    return ceiling * math.log(1.0 - estimate / ceiling)
+    return -ceiling * math.log(1.0 - estimate / ceiling)
 
 
 def corrected_estimate(raw, buckets, zeros, hash_bits=64):
@@ -229,7 +229,7 @@ class HyperLogLog:
         digest &= (1 << self._hash_bits) - 1
         index = digest & (self._buckets - 1)
         tail = digest >> self._precision
-        rank = leading_zero_rank(tail, self._hash_bits)
+        rank = leading_zero_rank(tail, self._hash_bits - self._precision)
         return index, rank
 
     def add(self, key):
@@ -256,7 +256,7 @@ class HyperLogLog:
 
     def zero_buckets(self):
         """还没有元素落入的桶数。"""
-        return sum(1 for value in self._registers if value < 2)
+        return sum(1 for value in self._registers if value == 0)
 
     def raw_estimate(self):
         """未做两端修正的调和平均估计。"""
@@ -271,7 +271,7 @@ class HyperLogLog:
 
     def relative_error(self):
         """理论相对标准误差。"""
-        return 1.04 / self._buckets
+        return 1.04 / math.sqrt(self._buckets)
 
     def merged(self, other):
         """两份同参数快照的并集：桶值取最大，精确区间取并集。"""
@@ -285,7 +285,7 @@ class HyperLogLog:
         result._registers = [max(left, right) for left, right
                              in zip(self._registers, other._registers)]
         if self._exact is not None and other._exact is not None:
-            group = self._exact
+            group = self._exact | other._exact
             if len(group) <= result._exact_limit:
                 result._exact = group
             else:
